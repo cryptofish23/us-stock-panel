@@ -3,7 +3,7 @@ import pandas as pd
 import requests
 from datetime import date, timedelta
 
-# 注入自定义 CSS 让卡片更美观（类似 TradingView）
+# 自定义 CSS 让卡片看起来像 TradingView 风格
 st.markdown("""
     <style>
     .card {
@@ -11,7 +11,7 @@ st.markdown("""
         border-radius: 12px;
         padding: 16px;
         margin: 8px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.6);
         color: white;
         text-align: center;
         border: 1px solid #333;
@@ -27,33 +27,32 @@ st.markdown("""
     }
     .change-up {
         color: #26a69a;
-        font-size: 1.6rem;
-        font-weight: bold;
-    }
-    .change-down {
-        color: #ef5350;
-        font-size: 1.6rem;
+        font-size: 1.8rem;
         font-weight: bold;
     }
     .volume {
-        font-size: 0.9rem;
-        color: #aaa;
+        font-size: 0.95rem;
+        color: #bbb;
     }
     .stApp {
         background-color: #0e1117;
     }
     </style>
-    """, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
-# Streamlit 配置（暗色主题支持）
-st.set_page_config(page_title="美股隔夜热门面板", page_icon="📈", layout="wide")
+# 页面配置
+st.set_page_config(
+    page_title="美股隔夜热门面板",
+    page_icon="📈",
+    layout="wide"
+)
 
 API_KEY = "TL754C8EQKUU5XH3"
 
 st.title("美股隔夜热门面板")
-st.caption("基于前一交易日涨幅榜 · 仅供参考，非投资建议 · 数据来源于 Alpha Vantage")
+st.caption("涨幅榜 + 热门板块个股参考 · 仅供参考，非投资建议")
 
-# 日期
+# 日期显示
 def get_previous_trading_day():
     day = date.today() - timedelta(days=1)
     while day.weekday() >= 5:
@@ -63,62 +62,89 @@ def get_previous_trading_day():
 prev_day = get_previous_trading_day()
 st.subheader(f"分析日期：{prev_day.strftime('%Y-%m-%d')}")
 
-with st.spinner("加载涨幅榜数据..."):
-    try:
-        url = f"https://www.alphavantage.co/query?function=TOP_GAINERS_LOSERS&apikey={API_KEY}"
-        response = requests.get(url)
-        data = response.json()
+# 静态示例数据（防止 API 失败导致白屏）
+example_data = [
+    {"Ticker": "NAMM", "涨幅 %": 130.61, "最新价": 2.26, "成交量": "160M"},
+    {"Ticker": "USGOW", "涨幅 %": 130.39, "最新价": 1.95, "成交量": "244K"},
+    {"Ticker": "PAVM", "涨幅 %": 94.67, "最新价": 12.05, "成交量": "54M"},
+    {"Ticker": "LSTA", "涨幅 %": 86.57, "最新价": 4.03, "成交量": "4.9M"},
+    {"Ticker": "ROMA", "涨幅 %": 66.21, "最新价": 2.41, "成交量": "5.4M"},
+    {"Ticker": "MLEC", "涨幅 %": 47.61, "最新价": 6.48, "成交量": "5.6M"},
+]
 
-        if "top_gainers" not in data or not data["top_gainers"]:
-            st.warning("暂无数据或限额已用，请稍后重试。")
-            st.stop()
+df_example = pd.DataFrame(example_data)
 
-        gainers = data["top_gainers"][:12]  # 取前12个做网格
+# 刷新按钮
+if st.button("点击刷新实时涨幅榜（Alpha Vantage）", type="primary"):
+    with st.spinner("正在拉取实时数据..."):
+        try:
+            url = f"https://www.alphavantage.co/query?function=TOP_GAINERS_LOSERS&apikey={API_KEY}"
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            data = response.json()
 
-        data_list = []
-        for item in gainers:
-            change_pct = float(item["change_percentage"].rstrip("%"))
-            volume = int(item["volume"]) if item["volume"].isdigit() else 0
+            if "top_gainers" not in data or not data["top_gainers"]:
+                st.warning("API 未返回涨幅数据（可能非交易日或限额已用）")
+                st.stop()
 
-            data_list.append({
-                "Ticker": item["ticker"],
-                "涨幅 %": round(change_pct, 2),
-                "最新价": round(float(item["price"]), 2),
-                "成交量": f"{volume:,}",
-                "变化金额": item["change_amount"]
-            })
+            gainers = data["top_gainers"][:12]
+            data_list = []
 
-        df = pd.DataFrame(data_list)
+            for item in gainers:
+                try:
+                    change_pct = float(item.get("change_percentage", "0").rstrip("%"))
+                    price = float(item.get("price", 0))
+                    volume = item.get("volume", "0")
+                    data_list.append({
+                        "Ticker": item["ticker"],
+                        "涨幅 %": round(change_pct, 2),
+                        "最新价": round(price, 2),
+                        "成交量": volume
+                    })
+                except:
+                    continue
 
-        # 网格布局：3列卡片
-        cols = st.columns(3)
-        for i, row in df.iterrows():
-            with cols[i % 3]:
-                change_class = "change-up" if row["涨幅 %"] > 0 else "change-down"
-                st.markdown(f"""
-                    <div class="card">
-                        <div class="ticker">{row['Ticker']}</div>
-                        <div class="price">${row['最新价']:.2f}</div>
-                        <div class="{change_class}">{row['涨幅 %']:+.2f}%</div>
-                        <div class="volume">成交量: {row['成交量']}</div>
-                    </div>
-                """, unsafe_allow_html=True)
+            if data_list:
+                df = pd.DataFrame(data_list)
+                st.success("数据刷新成功！")
+            else:
+                df = df_example
+                st.warning("实时数据为空，使用示例数据展示")
 
-                # 迷你线图占位（未来可加真实 mini chart）
-                st.caption("迷你走势（占位）")
-                st.line_chart([1, row["涨幅 %"]/10 + 1, row["涨幅 %"]/5 + 1], height=80, use_container_width=True)
+        except Exception as e:
+            st.error(f"刷新失败：{str(e)}")
+            st.info("使用示例数据继续展示")
+            df = df_example
+else:
+    st.info("点击上方按钮获取最新涨幅榜（否则显示示例数据）")
+    df = df_example
 
-        # 高成交量区（资金流入代理）
-        st.subheader("资金流入活跃个股（成交量前5）")
-        high_vol = df.sort_values("成交量", ascending=False).head(5)
-        st.dataframe(high_vol, use_container_width=True)
+# 卡片式网格展示（像 TradingView 热门股卡片）
+st.subheader("热门个股卡片展示")
+cols = st.columns(4)  # 每行4个卡片
+for i, row in df.iterrows():
+    with cols[i % 4]:
+        change_class = "change-up" if row["涨幅 %"] > 0 else ""
+        st.markdown(f"""
+            <div class="card">
+                <div class="ticker">{row['Ticker']}</div>
+                <div class="price">${row['最新价']:.2f}</div>
+                <div class="{change_class}">{row['涨幅 %']:+.2f}%</div>
+                <div class="volume">成交量: {row['成交量']}</div>
+            </div>
+        """, unsafe_allow_html=True)
 
-        st.subheader("市场要点（示例）")
-        st.info("昨晚存储/半导体板块大涨，MU/SNDK/INTC 等资金流入明显。")
+# 表格展示（备用）
+st.subheader("涨幅榜表格（含成交量排序）")
+st.dataframe(
+    df.sort_values("成交量", ascending=False),
+    use_container_width=True,
+    column_config={
+        "涨幅 %": st.column_config.NumberColumn(format="%.2f%%"),
+        "最新价": st.column_config.NumberColumn(format="%.2f USD")
+    }
+)
 
-    except Exception as e:
-        st.error(f"错误：{str(e)}")
-        st.info("检查 API key 或限额（Alpha Vantage 免费每天500次）。")
-
+# 页脚
 st.markdown("---")
-st.caption("Powered by Streamlit + Alpha Vantage | 更新：" + date.today().strftime("%Y-%m-%d"))
+st.caption("Powered by Streamlit + Alpha Vantage | 更新时间：" + date.today().strftime("%Y-%m-%d"))
