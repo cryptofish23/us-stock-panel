@@ -33,8 +33,8 @@ st.subheader(f"分析日期：{prev_day.strftime('%Y-%m-%d')}")
 # 加载数据
 with st.spinner("正在从 Polygon 获取涨幅榜数据..."):
     try:
-        # 使用 get_snapshot_all 获取股票市场快照（market_type="stocks"）
-        snapshots = client.get_snapshot_all(market_type="stocks", limit=500)
+        # 获取全市场股票快照（market_type="stocks"）
+        snapshots = client.get_snapshot_all(market_type="stocks")
 
         gainers_data = []
         for snap in snapshots:
@@ -110,8 +110,8 @@ with st.spinner("正在从 Polygon 获取涨幅榜数据..."):
         可能原因：
         1. API Key 无效或过期（请检查是否正确复制）
         2. 免费额度已用完（Polygon Basic 每天有限调用）
-        3. 网络问题或市场非交易日
-        请稍后再试，或换个时间段运行。
+        3. 非交易日或市场数据未更新
+        请稍后再试，或检查 key。
         """)
 
 # 页脚
