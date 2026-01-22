@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import requests
+import yfinance as yf
 from datetime import date, timedelta
 
 # 自定义 CSS 让卡片看起来像 TradingView 风格
@@ -30,12 +30,22 @@ st.markdown("""
         font-size: 1.8rem;
         font-weight: bold;
     }
+    .change-down {
+        color: #ef5350;
+        font-size: 1.8rem;
+        font-weight: bold;
+    }
     .volume {
         font-size: 0.95rem;
         color: #bbb;
     }
     .stApp {
         background-color: #0e1117;
+    }
+    .section-header {
+        color: #ffffff;
+        font-size: 1.5rem;
+        margin-top: 20px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -47,12 +57,10 @@ st.set_page_config(
     layout="wide"
 )
 
-API_KEY = "TL754C8EQKUU5XH3"
-
 st.title("美股隔夜热门面板")
-st.caption("涨幅榜 + 热门板块个股参考 · 仅供参考，非投资建议")
+st.caption("三大股指 + 热门板块个股 + 涨幅榜 · 仅供参考，非投资建议")
 
-# 日期显示
+# 日期
 def get_previous_trading_day():
     day = date.today() - timedelta(days=1)
     while day.weekday() >= 5:
@@ -60,91 +68,75 @@ def get_previous_trading_day():
     return day
 
 prev_day = get_previous_trading_day()
-st.subheader(f"分析日期：{prev_day.strftime('%Y-%m-%d')}")
+prev_day_str = prev_day.strftime('%Y-%m-%d')
+st.subheader(f"分析日期：{prev_day_str}")
 
-# 静态示例数据（防止 API 失败导致白屏）
-example_data = [
-    {"Ticker": "NAMM", "涨幅 %": 130.61, "最新价": 2.26, "成交量": "160M"},
-    {"Ticker": "USGOW", "涨幅 %": 130.39, "最新价": 1.95, "成交量": "244K"},
-    {"Ticker": "PAVM", "涨幅 %": 94.67, "最新价": 12.05, "成交量": "54M"},
-    {"Ticker": "LSTA", "涨幅 %": 86.57, "最新价": 4.03, "成交量": "4.9M"},
-    {"Ticker": "ROMA", "涨幅 %": 66.21, "最新价": 2.41, "成交量": "5.4M"},
-    {"Ticker": "MLEC", "涨幅 %": 47.61, "最新价": 6.48, "成交量": "5.6M"},
-]
+# 三大股指
+with st.spinner("加载三大股指数据..."):
+    indices = ['^DJI', '^GSPC', '^IXIC']  # Dow, S&P500, Nasdaq
+    indices_data = yf.download(indices, start=prev_day_str, end=prev_day_str)
+    df_indices = pd.DataFrame({
+        '指数': ['道指 (DJI)', '标普500 (GSPC)', '纳指 (IXIC)'],
+        '收盘价': indices_data['Close'].iloc[0].round(2),
+        '涨幅 %': ((indices_data['Close'] - indices_data['Open']) / indices_data['Open'] * 100).iloc[0].round(2),
+        '成交量': indices_data['Volume'].iloc[0].astype(int).apply(lambda x: f"{x:,}")
+    })
 
-df_example = pd.DataFrame(example_data)
+    st.markdown("<div class='section-header'>美国三大股指涨跌幅</div>", unsafe_allow_html=True)
+    cols = st.columns(3)
+    for i, row in df_indices.iterrows():
+        with cols[i]:
+            change_class = "change-up" if row["涨幅 %"] > 0 else "change-down"
+            st.markdown(f"""
+                <div class="card">
+                    <div class="ticker">{row['指数']}</div>
+                    <div class="price">${row['收盘价']:.2f}</div>
+                    <div class="{change_class}">{row['涨幅 %']:+.2f}%</div>
+                    <div class="volume">成交量: {row['成交量']}</div>
+                </div>
+            """, unsafe_allow_html=True)
 
-# 刷新按钮
-if st.button("点击刷新实时涨幅榜（Alpha Vantage）", type="primary"):
-    with st.spinner("正在拉取实时数据..."):
-        try:
-            url = f"https://www.alphavantage.co/query?function=TOP_GAINERS_LOSERS&apikey={API_KEY}"
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
-            data = response.json()
+# 热门板块
+plates = {
+    '芯片半导体': ['NVDA', 'TSM', 'INTC', 'AMD', 'QCOM', 'ASML', 'AVGO', 'TXN'],
+    '存储': ['MU', 'WDC', 'STX', 'SNDK'],
+    '光模块': ['LITE', 'CIEN', 'AAOI', 'IIVI'],
+    '无人机军事': ['KTOS', 'AVAV', 'LMT', 'NOC'],
+    '加密': ['MSTR', 'HOOD', 'COIN', 'RIOT', 'BITO'],
+    '云数据中心': ['IREN', 'APLD', 'CIFR', 'EQIX', 'DLR'],
+    '储能': ['TSLA', 'ENPH', 'SEDG', 'FSLR'],
+    '贵金属': ['GOLD', 'GDX', 'SLV', 'PAAS'],
+    '稀有金属': ['MP', 'ALB', 'SQM', 'LAC']
+}
 
-            if "top_gainers" not in data or not data["top_gainers"]:
-                st.warning("API 未返回涨幅数据（可能非交易日或限额已用）")
-                st.stop()
+for plate, tickers in plates.items():
+    with st.spinner(f"加载 {plate} 板块数据..."):
+        data = yf.download(tickers, start=prev_day_str, end=prev_day_str)
+        df_plate = pd.DataFrame({
+            'Ticker': data['Close'].columns,
+            '收盘价': data['Close'].iloc[0].round(2),
+            '涨幅 %': ((data['Close'] - data['Open']) / data['Open'] * 100).iloc[0].round(2),
+            '成交量': data['Volume'].iloc[0].astype(int).apply(lambda x: f"{x:,}")
+        }).dropna()
 
-            gainers = data["top_gainers"][:12]
-            data_list = []
+        if df_plate.empty:
+            st.warning(f"{plate} 板块暂无数据。")
+            continue
 
-            for item in gainers:
-                try:
-                    change_pct = float(item.get("change_percentage", "0").rstrip("%"))
-                    price = float(item.get("price", 0))
-                    volume = item.get("volume", "0")
-                    data_list.append({
-                        "Ticker": item["ticker"],
-                        "涨幅 %": round(change_pct, 2),
-                        "最新价": round(price, 2),
-                        "成交量": volume
-                    })
-                except:
-                    continue
-
-            if data_list:
-                df = pd.DataFrame(data_list)
-                st.success("数据刷新成功！")
-            else:
-                df = df_example
-                st.warning("实时数据为空，使用示例数据展示")
-
-        except Exception as e:
-            st.error(f"刷新失败：{str(e)}")
-            st.info("使用示例数据继续展示")
-            df = df_example
-else:
-    st.info("点击上方按钮获取最新涨幅榜（否则显示示例数据）")
-    df = df_example
-
-# 卡片式网格展示（像 TradingView 热门股卡片）
-st.subheader("热门个股卡片展示")
-cols = st.columns(4)  # 每行4个卡片
-for i, row in df.iterrows():
-    with cols[i % 4]:
-        change_class = "change-up" if row["涨幅 %"] > 0 else ""
-        st.markdown(f"""
-            <div class="card">
-                <div class="ticker">{row['Ticker']}</div>
-                <div class="price">${row['最新价']:.2f}</div>
-                <div class="{change_class}">{row['涨幅 %']:+.2f}%</div>
-                <div class="volume">成交量: {row['成交量']}</div>
-            </div>
-        """, unsafe_allow_html=True)
-
-# 表格展示（备用）
-st.subheader("涨幅榜表格（含成交量排序）")
-st.dataframe(
-    df.sort_values("成交量", ascending=False),
-    use_container_width=True,
-    column_config={
-        "涨幅 %": st.column_config.NumberColumn(format="%.2f%%"),
-        "最新价": st.column_config.NumberColumn(format="%.2f USD")
-    }
-)
+        st.markdown(f"<div class='section-header'>{plate} 板块个股涨幅</div>", unsafe_allow_html=True)
+        cols = st.columns(4)
+        for i, row in df_plate.iterrows():
+            with cols[i % 4]:
+                change_class = "change-up" if row["涨幅 %"] > 0 else "change-down"
+                st.markdown(f"""
+                    <div class="card">
+                        <div class="ticker">{row['Ticker']}</div>
+                        <div class="price">${row['收盘价']:.2f}</div>
+                        <div class="{change_class}">{row['涨幅 %']:+.2f}%</div>
+                        <div class="volume">成交量: {row['成交量']}</div>
+                    </div>
+                """, unsafe_allow_html=True)
 
 # 页脚
 st.markdown("---")
-st.caption("Powered by Streamlit + Alpha Vantage | 更新时间：" + date.today().strftime("%Y-%m-%d"))
+st.caption("Powered by Streamlit + yfinance | 更新时间：" + date.today().strftime("%Y-%m-%d"))
